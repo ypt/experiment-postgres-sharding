@@ -11,7 +11,7 @@ Here is an example scenario:
 1. A new service starts with a small, simple, easy to work with database - a single schema, no partitions, no sharding, using just a column in each table to specify the tenant for multi-tenancy
 2. As the service evolves, various schema changes may happen
 3. As the service sees more usage, more and more data is inserted
-4. At some point, the database has grown large enough such that we'd want to scale it somehow. (Vertical scling is probably the simplest thing we'd reach for. Though, at some point, if the service continues to grow - we'd likely want to look o our horizontal scaling options)
+4. At some point, the database has grown large enough such that we'd want to scale it somehow. (Vertical scaling is probably the simplest thing we'd reach for. Though, at some point, if the service continues to grow - we'd likely want to look at our horizontal scaling options)
 5. We horizontally scale the database
 6. Ideally, this change can be transparent to the app. No code changes. Schema changes can continue to happen as the service continues to evolve
 7. Repeat from Step 2
@@ -427,8 +427,9 @@ SELECT * FROM exercises_2;
  4f32eadf-0abe-480a-93bc-8780fdf85b5d | Dory   | swimming |
 ```
 
-### Limitations
+## Limitations
 
+### ALTER TABLE does not propagate to remote servers
 Let's see if table alterations continue to propagate out from the primary partitioned table
 
 ```SQL
@@ -467,12 +468,43 @@ SELECT * FROM exercises;
  216b0fd6-5baf-4432-80c6-069243e8cba4 | Eggbert   | sitting  |             |
 ```
 
+### Foreign keys are not supported with foreign tables
+Let's try to create a foreign key reference _to_ our partitioned table
+```SQL
+CREATE TABLE exercisers (
+  id UUID PRIMARY KEY,
+  tenant VARCHAR NOT NULL,
+  exercise_id UUID NOT NULL,
+  FOREIGN KEY(exercise_id) REFERENCES exercises(id)
+);
+
+ERROR:  cannot reference partitioned table "exercises"
+```
+
+Let's try to create a foreign key reference _from_ our partitioned table
+
+```SQL
+CREATE TABLE tenants (
+  tenant VARCHAR NOT NULL PRIMARY KEY
+);
+INSERT into tenants SELECT DISTINCT tenant from exercises;
+ALTER TABLE exercises
+  ADD CONSTRAINT fk_exercises_tenants FOREIGN KEY (tenant) REFERENCES tenants(tenant);
+
+ERROR:  "exercises_2" is a foreign table
+DETAIL:  Foreign tables cannot have constraint triggers.
+```
+
+Note: When leveraging table partitioning _without_ foreign tables - foreign key references _from_ a partitioned table to some other table [_are supported_](https://www.postgresql.org/docs/11/ddl-partitioning.html#DDL-PARTITIONING-DECLARATIVE-LIMITATIONS). But foreign keys _referencing_ partitioned tables are still [_not supported_](https://www.postgresql.org/docs/11/ddl-partitioning.html#DDL-PARTITIONING-DECLARATIVE-LIMITATIONS).
+
+### Other limitations
+See https://www.postgresql.org/docs/11/ddl-partitioning.html#DDL-PARTITIONING-DECLARATIVE-LIMITATIONS
+
 ## TODO
 - test out [transactions across foreign server with postgres_fdw](https://www.postgresql.org/docs/11/postgres-fdw.html#id-1.11.7.42.12)
 - try out different partitioning schemes - LIST, HASH
 - examine performance for partitioning, FDW
 - look into improving dev experience around `ALTER TABLE` limitation with foreign tables. Maybe leverage a trigger as a workaround?
-- Is this [foreign key limitation](https://www.postgresql.org/docs/11/ddl-partitioning.html#DDL-PARTITIONING-DECLARATIVE-LIMITATIONS) a dealbreaker? "While primary keys are supported on partitioned tables, foreign keys referencing partitioned tables are not supported. (Foreign key references from a par"titioned table to some other table are supported.)"
 
 ## Resources
 - https://pgdash.io/blog/postgres-11-sharding.html
